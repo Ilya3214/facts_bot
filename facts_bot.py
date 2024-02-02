@@ -12,8 +12,8 @@ import logging
 logging.basicConfig(filename='bot.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Конфигурация бота и API
-bot_token = 'YOUR_BOT_TOKEN'
-openai_api_key = 'YOUR_OPENAI_API_KEY'
+bot_token = 'telegram_bot_token_here'
+openai_api_key = 'openai_api_key_here'
 bot = telebot.TeleBot(bot_token)
 openai.api_key = openai_api_key
 
@@ -37,8 +37,8 @@ def get_fact_with_topic(chat_id, topic):
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": f"Tell me an interesting fact about: {topic}"}
+                {"role": "system", "content": "вы - полезный помощник."},
+                {"role": "user", "content": f"Расскажите мне интересный факт о: {topic}"}
             ]
         )
         return response['choices'][0]['message']['content']
@@ -56,30 +56,16 @@ def send_random_fact(chat_id):
     else:
         bot.send_message(chat_id, "Вы не указали темы для интересных фактов. Используйте /factsedit, чтобы добавить темы.")
 
-def send_fact_to_random_user():
-    all_users = list(user_topics.keys())
-    if not all_users:
-        log("Нет доступных пользователей для отправки сообщений.")
-        return
-
-    random_user = random.choice(all_users)
-    if not user_topics[random_user]:
-        log(f"У пользователя {random_user} нет тем для отправки.")
-        return
-
-    random_topic = random.choice(user_topics[random_user])
-    fact = get_fact_with_topic(random_user, random_topic)
-    bot.send_message(random_user, fact)
-
 # Обработчики команд
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
     if is_command_available(start_requests[chat_id]):
         start_requests[chat_id] = datetime.now()
-        welcome_text = "Привет! Я бот, который расскажет тебе интересные факты. Напиши /fact чтобы получить факт."
+        welcome_text = "Привет! Я, Sheldon, который расскажет тебе интересные факты. Напиши /fact чтобы получить факт."
         bot.reply_to(message, welcome_text)
         send_random_fact(chat_id)
+        update_schedule_for_user(chat_id)  # Обновляем расписание для пользователя
     else:
         bot.send_message(chat_id, "Вы уже использовали команду /start сегодня. Пожалуйста, попробуйте снова завтра.")
 
@@ -123,6 +109,7 @@ def save_topics(message, chat_id):
     topics = [topic.strip() for topic in message.text.split(',')]
     user_topics[chat_id] = topics
     user_editing_topics[chat_id] = False
+    update_schedule_for_user(chat_id)  # Обновляем расписание для этого пользователя
     bot.send_message(chat_id, f"Темы фактов обновлены: {', '.join(topics)}")
 
 @bot.message_handler(commands=['factslist'])
@@ -147,11 +134,19 @@ def display_help(message):
     help_text += "/help - Показать список доступных команд\n"
     bot.send_message(chat_id, help_text)
 
-@bot.message_handler(commands=['send_random_fact'])
-def send_random_fact_command(message):
-    send_fact_to_random_user()
-
 # Расписание отправки сообщений
+def send_scheduled_message(chat_id):
+    if chat_id in user_topics and user_topics[chat_id]:
+        random_topic = random.choice(user_topics[chat_id])
+        fact = get_fact_with_topic(chat_id, random_topic)
+        bot.send_message(chat_id, fact)
+        user_last_fact_time[chat_id] = datetime.now()
+        schedule.every(60).minutes.do(send_scheduled_message, chat_id).tag(str(chat_id))
+
+def update_schedule_for_user(chat_id):
+    schedule.clear(str(chat_id))
+    schedule.every(120).minutes.do(send_scheduled_message, chat_id).tag(str(chat_id))
+
 def run_schedule():
     while True:
         schedule.run_pending()
